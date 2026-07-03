@@ -1,0 +1,21 @@
+[project]
+name = "google-workspace-mcp"
+version = "0.1.0"
+description = "Read-only MCP server for Gmail, Google Drive, Docs, and Sheets."
+requires-python = ">=3.11"
+dependencies = [
+  "google-api-python-client>=2.140.0",
+  "google-auth>=2.33.0",
+  "google-auth-oauthlib>=1.2.1",
+  "mcp>=1.2.0",
+  "pydantic>=2.8.0",
+]
+
+[project.scripts]
+google-workspace-mcp = "google_workspace_mcp.server:main"
+
+[tool.black]
+line-length = 120
+
+[tool.ruff]
+line-length = 120
