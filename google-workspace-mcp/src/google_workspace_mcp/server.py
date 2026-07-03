@@ -18,6 +18,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
     "https://www.googleapis.com/auth/documents.readonly",
     "https://www.googleapis.com/auth/spreadsheets.readonly",
+    "https://www.googleapis.com/auth/calendar.readonly",
 ]
 
 mcp = FastMCP("google-workspace")
@@ -228,6 +229,78 @@ def workspace_get_from_url(url: str) -> dict[str, Any]:
     if kind == "sheet":
         return {"kind": kind, "data": sheets_get_values(file_id)}
     return {"kind": kind, "data": drive_get_file(file_id)}
+
+
+def _event_summary(event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": event.get("id"),
+        "summary": event.get("summary"),
+        "status": event.get("status"),
+        "start": event.get("start"),
+        "end": event.get("end"),
+        "location": event.get("location"),
+        "organizer": event.get("organizer"),
+        "attendees": [
+            {"email": a.get("email"), "responseStatus": a.get("responseStatus")}
+            for a in event.get("attendees", [])
+        ],
+        "hangout_link": event.get("hangoutLink"),
+        "html_link": event.get("htmlLink"),
+    }
+
+
+@mcp.tool()
+def calendar_list_calendars() -> dict[str, Any]:
+    """List calendars visible to the authenticated account."""
+    service = _service("calendar", "v3")
+    result = service.calendarList().list().execute()
+    return {
+        "calendars": [
+            {"id": c.get("id"), "summary": c.get("summary"), "primary": c.get("primary", False)}
+            for c in result.get("items", [])
+        ]
+    }
+
+
+@mcp.tool()
+def calendar_list_events(
+    time_min: str | None = None,
+    time_max: str | None = None,
+    query: str | None = None,
+    calendar_id: str = "primary",
+    page_size: int = 10,
+) -> dict[str, Any]:
+    """List calendar events, expanded and ordered by start time. Times are RFC3339 (e.g. 2026-07-03T00:00:00+07:00); time_min defaults to now."""
+    from datetime import datetime, timezone
+
+    service = _service("calendar", "v3")
+    params: dict[str, Any] = {
+        "calendarId": calendar_id,
+        "maxResults": min(max(page_size, 1), 50),
+        "singleEvents": True,
+        "orderBy": "startTime",
+        "timeMin": time_min or datetime.now(timezone.utc).isoformat(),
+    }
+    if time_max:
+        params["timeMax"] = time_max
+    if query:
+        params["q"] = query
+    result = service.events().list(**params).execute()
+    return {
+        "calendar_id": calendar_id,
+        "events": [_event_summary(event) for event in result.get("items", [])],
+        "next_page_token": result.get("nextPageToken"),
+    }
+
+
+@mcp.tool()
+def calendar_get_event(event_id: str, calendar_id: str = "primary") -> dict[str, Any]:
+    """Get a calendar event by id, including description and full attendee list."""
+    service = _service("calendar", "v3")
+    event = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
+    detail = _event_summary(event)
+    detail["description"] = event.get("description")
+    return detail
 
 
 def main() -> None:

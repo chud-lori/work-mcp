@@ -26,7 +26,7 @@ Then provide credentials (secrets are deliberately NOT in this bundle):
 1. **Slack** — put your user token in `slack-mcp/.env`:
    `SLACK_USER_TOKEN=xoxp-...` (from https://api.slack.com/apps, see
    `slack-mcp/README.md` for the scope list).
-2. **Google** — copy `~/.config/codex-google-local-mcp/oauth-client.json`
+2. **Google** — copy `~/.config/google-workspace-mcp/oauth-client.json`
    and `token.json` from the old machine to the same path on the new one.
    No `token.json`? The server runs the OAuth browser flow on first use.
 3. **Atlassian** — nothing to copy; a browser OAuth prompt appears the first

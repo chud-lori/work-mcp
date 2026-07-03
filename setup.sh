@@ -34,11 +34,11 @@ if ! "$GW/.venv/bin/python" -c '' >/dev/null 2>&1; then
   python3 -m venv "$GW/.venv"
 fi
 "$GW/.venv/bin/pip" install --quiet "$GW"
-GCFG="$HOME/.config/codex-google-local-mcp"
+GCFG="$HOME/.config/google-workspace-mcp"
 mkdir -p "$GCFG"
 if [ ! -f "$GCFG/oauth-client.json" ]; then
   echo "    NOTE: copy oauth-client.json (and token.json if you have it) into $GCFG/"
-  echo "          from the old machine's ~/.config/codex-google-local-mcp/"
+  echo "          from the old machine's ~/.config/google-workspace-mcp/"
 fi
 if registered google_workspace_local; then
   echo "    already registered, skipping"

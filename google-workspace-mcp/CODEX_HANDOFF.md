@@ -79,9 +79,9 @@ In Google Cloud Console:
 6. Store outside git:
 
 ```bash
-mkdir -p ~/.config/codex-google-local-mcp
-mv ~/Downloads/client_secret_*.json ~/.config/codex-google-local-mcp/oauth-client.json
-chmod 600 ~/.config/codex-google-local-mcp/oauth-client.json
+mkdir -p ~/.config/google-workspace-mcp
+mv ~/Downloads/client_secret_*.json ~/.config/google-workspace-mcp/oauth-client.json
+chmod 600 ~/.config/google-workspace-mcp/oauth-client.json
 ```
 
 ## Suggested Codex MCP Config
@@ -97,8 +97,8 @@ default_tools_approval_mode = "prompt"
 enabled = true
 
 [mcp_servers.google_workspace_local.env]
-GOOGLE_WORKSPACE_CREDENTIALS_FILE = "/Users/nurchudlori/.config/codex-google-local-mcp/oauth-client.json"
-GOOGLE_WORKSPACE_TOKEN_FILE = "/Users/nurchudlori/.config/codex-google-local-mcp/token.json"
+GOOGLE_WORKSPACE_CREDENTIALS_FILE = "/Users/nurchudlori/.config/google-workspace-mcp/oauth-client.json"
+GOOGLE_WORKSPACE_TOKEN_FILE = "/Users/nurchudlori/.config/google-workspace-mcp/token.json"
 ```
 
 Restart Codex after adding the config.
