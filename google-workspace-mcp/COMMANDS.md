@@ -5,16 +5,20 @@ Goal: standalone read-only MCP server that lets Codex access permitted Gmail, Go
 Project path:
 
 ```bash
-cd /Users/nurchudlori/repo/google-workspace-mcp
+cd /path/to/work-mcp/google-workspace-mcp
 ```
 
-## 1. Use Existing Environment
+## 1. Create The Virtualenv
+
+Install into a local virtualenv inside the project (this is what `setup.sh`
+does automatically):
 
 ```bash
-/Users/nurchudlori/.pyenv/versions/mcp-99/bin/pip install -e .
+python3 -m venv .venv
+.venv/bin/pip install -e .
 ```
 
-This project is installed into the existing pyenv environment `mcp-99`; do not create a separate local `.venv` unless you intentionally want to change that setup.
+The MCP entry point is then at `.venv/bin/google-workspace-mcp`.
 
 ## 2. Create Google OAuth Credentials
 
@@ -43,8 +47,8 @@ chmod 600 ~/.config/google-workspace-mcp/oauth-client.json
 Use these paths:
 
 ```text
-GOOGLE_WORKSPACE_CREDENTIALS_FILE=/Users/nurchudlori/.config/google-workspace-mcp/oauth-client.json
-GOOGLE_WORKSPACE_TOKEN_FILE=/Users/nurchudlori/.config/google-workspace-mcp/token.json
+GOOGLE_WORKSPACE_CREDENTIALS_FILE=~/.config/google-workspace-mcp/oauth-client.json
+GOOGLE_WORKSPACE_TOKEN_FILE=~/.config/google-workspace-mcp/token.json
 ```
 
 ## 4. First Auth Run
@@ -52,26 +56,27 @@ GOOGLE_WORKSPACE_TOKEN_FILE=/Users/nurchudlori/.config/google-workspace-mcp/toke
 The first Google API call should open an OAuth browser flow and create `token.json`.
 
 ```bash
-GOOGLE_WORKSPACE_CREDENTIALS_FILE=/Users/nurchudlori/.config/google-workspace-mcp/oauth-client.json \
-GOOGLE_WORKSPACE_TOKEN_FILE=/Users/nurchudlori/.config/google-workspace-mcp/token.json \
-/Users/nurchudlori/.pyenv/versions/mcp-99/bin/google-workspace-mcp
+GOOGLE_WORKSPACE_CREDENTIALS_FILE=~/.config/google-workspace-mcp/oauth-client.json \
+GOOGLE_WORKSPACE_TOKEN_FILE=~/.config/google-workspace-mcp/token.json \
+.venv/bin/google-workspace-mcp
 ```
 
 ## 5. Add To Codex MCP Config
 
-Add this to `/Users/nurchudlori/.codex/config.toml`:
+Add this to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.google_workspace_local]
-command = "/Users/nurchudlori/.pyenv/versions/mcp-99/bin/google-workspace-mcp"
+# Use the absolute path to the .venv entry point created above.
+command = "/path/to/work-mcp/google-workspace-mcp/.venv/bin/google-workspace-mcp"
 startup_timeout_sec = 20
 tool_timeout_sec = 90
 default_tools_approval_mode = "prompt"
 enabled = true
 
 [mcp_servers.google_workspace_local.env]
-GOOGLE_WORKSPACE_CREDENTIALS_FILE = "/Users/nurchudlori/.config/google-workspace-mcp/oauth-client.json"
-GOOGLE_WORKSPACE_TOKEN_FILE = "/Users/nurchudlori/.config/google-workspace-mcp/token.json"
+GOOGLE_WORKSPACE_CREDENTIALS_FILE = "~/.config/google-workspace-mcp/oauth-client.json"
+GOOGLE_WORKSPACE_TOKEN_FILE = "~/.config/google-workspace-mcp/token.json"
 ```
 
 Then restart Codex.

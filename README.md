@@ -1,19 +1,33 @@
 # work-mcp
 
-Portable bundle of my work MCP servers for Claude Code. Clone this repo to a
-new machine and run `./setup.sh` to install and register everything.
+A portable bundle of read-only MCP servers for use with Claude Code (or any
+MCP client, e.g. Codex). Clone the repo, run `./setup.sh`, add your own
+credentials, and you get read-only access to Slack, Google Workspace, and
+Atlassian from your agent.
+
+Everything is **read-only by design** — none of these servers can send, write,
+edit, or delete. They authenticate as *you* and see only what your account can
+already see.
 
 ## What's inside
 
 | Server | Type | What it does |
 |---|---|---|
-| `slack-mcp/` | local Node | Read-only Slack: channels, threads, users, files/images, search |
+| `slack-mcp/` | local Node | Read-only Slack: channels, threads, users, files/images, message search |
 | `google-workspace-mcp/` | local Python | Read-only Gmail, Drive, Docs, Sheets |
-| atlassian | remote (`mcp-remote`) | Jira + Confluence via Atlassian's hosted MCP — no code here, setup.sh just registers it |
+| atlassian | remote (`mcp-remote`) | Jira + Confluence via Atlassian's hosted MCP — no code here, `setup.sh` just registers it |
 
-## New machine setup
+No secrets are committed to this repo. You supply your own tokens/credentials
+after cloning (see below), and `.gitignore` keeps them out of git.
 
-Prereqs: `node`/`npm`, `python3`, and the `claude` CLI installed.
+## Prerequisites
+
+- `node` / `npm`
+- `python3`
+- `npx`
+- the `claude` CLI (Claude Code) on your `PATH`
+
+## Quick start
 
 ```sh
 git clone <repo-url> ~/Projects/work-mcp
@@ -21,23 +35,63 @@ cd ~/Projects/work-mcp
 ./setup.sh
 ```
 
-Then provide credentials (secrets are deliberately NOT in this bundle):
+`setup.sh` is idempotent: it installs dependencies, registers each server with
+Claude Code (user scope), and **skips any server that's already registered**, so
+re-running it is safe.
 
-1. **Slack** — put your user token in `slack-mcp/.env`:
-   `SLACK_USER_TOKEN=xoxp-...` (from https://api.slack.com/apps, see
-   `slack-mcp/README.md` for the scope list).
-2. **Google** — copy `~/.config/google-workspace-mcp/oauth-client.json`
-   and `token.json` from the old machine to the same path on the new one.
-   No `token.json`? The server runs the OAuth browser flow on first use.
-3. **Atlassian** — nothing to copy; a browser OAuth prompt appears the first
-   time Claude uses it.
+After it finishes, add credentials for each server (next section), restart
+Claude Code, and run `/mcp` — all three should show as connected.
 
-Restart Claude Code and run `/mcp` — all three should show as connected.
+## Credential setup
+
+Secrets are deliberately **not** in this repo. Set them up once per server.
+
+### 1. Slack
+
+Create a Slack app, grant read-only **user** scopes, install it, and copy the
+user token (`xoxp-...`) into `slack-mcp/.env`:
+
+```sh
+SLACK_USER_TOKEN=xoxp-your-token-here
+```
+
+`setup.sh` creates `slack-mcp/.env` from the example for you. Full scope list
+and step-by-step app creation instructions are in
+[`slack-mcp/README.md`](slack-mcp/README.md).
+
+### 2. Google Workspace
+
+Create a Google Cloud project, enable the Gmail/Drive/Docs/Sheets APIs, create
+a **Desktop app** OAuth client with read-only scopes, and download the client
+secret JSON:
+
+```sh
+mkdir -p ~/.config/google-workspace-mcp
+mv ~/Downloads/client_secret_*.json ~/.config/google-workspace-mcp/oauth-client.json
+chmod 600 ~/.config/google-workspace-mcp/oauth-client.json
+```
+
+On first use the server opens an OAuth browser flow and writes
+`~/.config/google-workspace-mcp/token.json` — no manual token step needed.
+Detailed Google Cloud Console walkthrough is in
+[`google-workspace-mcp/COMMANDS.md`](google-workspace-mcp/COMMANDS.md).
+
+### 3. Atlassian (Jira + Confluence)
+
+Nothing to copy. This is Atlassian's hosted MCP registered via `mcp-remote`;
+a browser OAuth prompt appears the first time your agent uses it.
+
+## Using with Codex instead of Claude Code
+
+Each local server can also be wired into Codex's `~/.codex/config.toml`. See
+[`google-workspace-mcp/COMMANDS.md`](google-workspace-mcp/COMMANDS.md) for an
+example MCP server config block.
 
 ## Notes
 
-- `setup.sh` is idempotent: it skips servers already registered, so running
-  it on a machine that already has some of them set up won't disturb them.
-- The copies here are snapshots. The originals live at
-  `~/Projects/slack-mcp` and `~/repo/google-workspace-mcp` on the source
-  machine — re-run the rsync (or just re-copy the dirs) after changing them.
+- Servers register at **user scope**, so they're available across all your
+  Claude Code projects on this machine.
+- To re-run Google OAuth from scratch, delete
+  `~/.config/google-workspace-mcp/token.json` and trigger any Google tool.
+- To remove a server: `claude mcp remove <name>` (`slack`,
+  `google_workspace_local`, or `atlassian`).

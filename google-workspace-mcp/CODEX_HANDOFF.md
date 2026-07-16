@@ -5,7 +5,7 @@ This project is a standalone local MCP server outside application repos.
 Path:
 
 ```bash
-/Users/nurchudlori/repo/google-workspace-mcp
+~/repo/google-workspace-mcp
 ```
 
 ## Objective
@@ -54,14 +54,16 @@ token.json
 
 ## Setup Commands
 
-The package is installed into the existing pyenv environment `mcp-99`:
+Install into a local virtualenv inside the project (this is what `setup.sh`
+does automatically):
 
 ```bash
-cd /Users/nurchudlori/repo/google-workspace-mcp
-/Users/nurchudlori/.pyenv/versions/mcp-99/bin/pip install -e .
+cd /path/to/work-mcp/google-workspace-mcp
+python3 -m venv .venv
+.venv/bin/pip install -e .
 ```
 
-Do not create a separate local `.venv` unless you intentionally want to change that setup.
+The MCP entry point is then at `.venv/bin/google-workspace-mcp`.
 
 ## Google Cloud Setup
 
@@ -86,19 +88,20 @@ chmod 600 ~/.config/google-workspace-mcp/oauth-client.json
 
 ## Suggested Codex MCP Config
 
-Add this to `/Users/nurchudlori/.codex/config.toml`:
+Add this to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.google_workspace_local]
-command = "/Users/nurchudlori/.pyenv/versions/mcp-99/bin/google-workspace-mcp"
+# Use the absolute path to the .venv entry point created above.
+command = "/path/to/work-mcp/google-workspace-mcp/.venv/bin/google-workspace-mcp"
 startup_timeout_sec = 20
 tool_timeout_sec = 90
 default_tools_approval_mode = "prompt"
 enabled = true
 
 [mcp_servers.google_workspace_local.env]
-GOOGLE_WORKSPACE_CREDENTIALS_FILE = "/Users/nurchudlori/.config/google-workspace-mcp/oauth-client.json"
-GOOGLE_WORKSPACE_TOKEN_FILE = "/Users/nurchudlori/.config/google-workspace-mcp/token.json"
+GOOGLE_WORKSPACE_CREDENTIALS_FILE = "~/.config/google-workspace-mcp/oauth-client.json"
+GOOGLE_WORKSPACE_TOKEN_FILE = "~/.config/google-workspace-mcp/token.json"
 ```
 
 Restart Codex after adding the config.

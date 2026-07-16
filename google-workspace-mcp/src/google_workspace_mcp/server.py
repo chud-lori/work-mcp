@@ -58,6 +58,71 @@ def _service(name: str, version: str):
     return build(name, version, credentials=_credentials(), cache_discovery=False)
 
 
+def _allowed_folder_ids() -> set[str]:
+    """Drive folder IDs the server is restricted to, from the environment.
+
+    Empty set means no restriction (full access to whatever the account can see).
+    """
+    raw = os.environ.get("GOOGLE_WORKSPACE_ALLOWED_FOLDER_IDS", "")
+    return {fid.strip() for fid in raw.split(",") if fid.strip()}
+
+
+def _within_allowed_folders(
+    drive_service,
+    file_id: str,
+    allowed: set[str],
+    cache: dict[str, bool],
+    _visiting: set[str] | None = None,
+) -> bool:
+    """True if file_id is one of, or nested anywhere under, an allowed folder.
+
+    Walks the Drive parent chain (subtree-aware). `cache` memoises results across
+    calls; `_visiting` guards against parent cycles.
+    """
+    if not allowed:
+        return True
+    if file_id in allowed:
+        return True
+    if file_id in cache:
+        return cache[file_id]
+
+    _visiting = _visiting if _visiting is not None else set()
+    if file_id in _visiting:
+        return False
+    _visiting.add(file_id)
+
+    try:
+        meta = drive_service.files().get(
+            fileId=file_id, fields="id,parents", supportsAllDrives=True
+        ).execute()
+        parents = meta.get("parents", []) or []
+    except Exception:
+        parents = []
+
+    result = any(
+        _within_allowed_folders(drive_service, parent, allowed, cache, _visiting)
+        for parent in parents
+    )
+    cache[file_id] = result
+    return result
+
+
+def _enforce_allowed(file_id: str, drive_service=None) -> None:
+    """Raise PermissionError if file_id is outside the configured folder allow-list.
+
+    No-op when GOOGLE_WORKSPACE_ALLOWED_FOLDER_IDS is unset.
+    """
+    allowed = _allowed_folder_ids()
+    if not allowed:
+        return
+    drive_service = drive_service or _service("drive", "v3")
+    if not _within_allowed_folders(drive_service, file_id, allowed, {}):
+        raise PermissionError(
+            f"Access denied: {file_id} is not within an allowed folder "
+            "(set by GOOGLE_WORKSPACE_ALLOWED_FOLDER_IDS)."
+        )
+
+
 def _extract_text_from_doc_content(content: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for item in content:
@@ -179,13 +244,19 @@ def drive_search(query: str, page_size: int = 10, drive_id: str | None = None) -
     if drive_id:
         params.update({"driveId": drive_id, "corpora": "drive"})
     result = service.files().list(**params).execute()
-    return {"files": result.get("files", [])}
+    files = result.get("files", [])
+    allowed = _allowed_folder_ids()
+    if allowed:
+        cache: dict[str, bool] = {}
+        files = [f for f in files if _within_allowed_folders(service, f["id"], allowed, cache)]
+    return {"files": files}
 
 
 @mcp.tool()
 def drive_get_file(file_id: str) -> dict[str, Any]:
     """Get Google Drive file metadata by file id."""
     service = _service("drive", "v3")
+    _enforce_allowed(file_id, service)
     return service.files().get(
         fileId=file_id,
         fields="id,name,mimeType,webViewLink,modifiedTime,owners(displayName,emailAddress)",
@@ -196,6 +267,7 @@ def drive_get_file(file_id: str) -> dict[str, Any]:
 @mcp.tool()
 def docs_get_text(document_id: str) -> dict[str, Any]:
     """Get plain text from a Google Doc by document id."""
+    _enforce_allowed(document_id)
     service = _service("docs", "v1")
     doc = service.documents().get(documentId=document_id).execute()
     text = _extract_text_from_doc_content(doc.get("body", {}).get("content", []))
@@ -205,6 +277,7 @@ def docs_get_text(document_id: str) -> dict[str, Any]:
 @mcp.tool()
 def sheets_get_values(spreadsheet_id: str, range_name: str = "A1:Z1000") -> dict[str, Any]:
     """Get cell values from a Google Sheet range."""
+    _enforce_allowed(spreadsheet_id)
     service = _service("sheets", "v4")
     spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
     values = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
