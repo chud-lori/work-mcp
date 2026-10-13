@@ -1,21 +1,23 @@
 # work-mcp
 
-A portable bundle of read-only MCP servers for use with Claude Code (or any
-MCP client, e.g. Codex). Clone the repo, run `./setup.sh`, add your own
-credentials, and you get read-only access to Slack, Google Workspace, and
-Atlassian from your agent.
+A portable bundle of MCP servers for use with Claude Code (or any MCP client,
+e.g. Codex). Clone the repo, run `./setup.sh`, add your own credentials, and
+your agent can read Slack, Google Workspace, and Atlassian.
 
-Everything is **read-only by design** — none of these servers can send, write,
-edit, or delete. They authenticate as *you* and see only what your account can
-already see.
+The two local servers (Slack, Google) are **read-only by design** — their
+credentials carry read-only scopes, so they cannot send, write, edit, or
+delete. The Atlassian server is **not** read-only: it is Atlassian's hosted MCP,
+which also exposes write tools (create/edit issues, comments, Confluence pages).
+See [Atlassian](#3-atlassian-jira--confluence) for how to block those. All
+servers authenticate as *you* and see only what your account can already see.
 
 ## What's inside
 
 | Server | Type | What it does |
 |---|---|---|
 | `slack-mcp/` | local Node | Read-only Slack: channels, threads, users, files/images, message search |
-| `google-workspace-mcp/` | local Python | Read-only Gmail, Drive, Docs, Sheets |
-| atlassian | remote (`mcp-remote`) | Jira + Confluence via Atlassian's hosted MCP — no code here, `setup.sh` just registers it |
+| `google-workspace-mcp/` | local Python | Read-only Gmail, Drive, Docs, Sheets, Calendar |
+| atlassian | remote (`mcp-remote`) | Jira + Confluence via Atlassian's hosted MCP — read **and write**; no code here, `setup.sh` just registers it |
 
 No secrets are committed to this repo. You supply your own tokens/credentials
 after cloning (see below), and `.gitignore` keeps them out of git.
@@ -61,7 +63,7 @@ and step-by-step app creation instructions are in
 
 ### 2. Google Workspace
 
-Create a Google Cloud project, enable the Gmail/Drive/Docs/Sheets APIs, create
+Create a Google Cloud project, enable the Gmail/Drive/Docs/Sheets/Calendar APIs, create
 a **Desktop app** OAuth client with read-only scopes, and download the client
 secret JSON:
 
@@ -80,6 +82,13 @@ Detailed Google Cloud Console walkthrough is in
 
 Nothing to copy. This is Atlassian's hosted MCP registered via `mcp-remote`;
 a browser OAuth prompt appears the first time your agent uses it.
+
+Unlike the local servers, its tools include writes (creating and editing Jira
+issues, adding comments, transitions, creating and updating Confluence pages),
+and this repo cannot scope them down. Claude Code asks before each MCP tool call
+unless you have allowed it; to block the write tools outright, add them to
+`permissions.deny` in `~/.claude/settings.json` (run `/mcp` to see the exact
+tool names), e.g. `"mcp__atlassian__createJiraIssue"`.
 
 ## Using with Codex instead of Claude Code
 
