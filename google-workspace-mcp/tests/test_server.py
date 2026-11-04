@@ -106,7 +106,7 @@ class WorkspaceDispatchTests(unittest.TestCase):
             "drive_get_file": server.drive_get_file,
         }
 
-        def fake_docs(file_id: str) -> dict[str, str]:
+        def fake_docs(file_id: str, tab_id: str | None = None) -> dict[str, str]:
             calls.append(("doc", file_id))
             return {"id": file_id}
 
@@ -201,3 +201,75 @@ class AllowedFolderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _para(text: str) -> dict:
+    return {"paragraph": {"elements": [{"textRun": {"content": text}}]}}
+
+
+def _tab(tab_id: str, title: str, content: list, children: list | None = None) -> dict:
+    return {
+        "tabProperties": {"tabId": tab_id, "title": title},
+        "documentTab": {"body": {"content": content}},
+        "childTabs": children or [],
+    }
+
+
+class DocTabsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.doc = {
+            "title": "Notes",
+            "tabs": [
+                _tab("t.0", "Summary", [_para("first\n")]),
+                _tab("t.1", "Transcript", [_para("second\n")], [_tab("t.2", "Child", [_para("third\n")])]),
+            ],
+        }
+        service = mock.MagicMock()
+        service.documents.return_value.get.return_value.execute.return_value = self.doc
+        self.service = service
+        patches = [
+            mock.patch.object(server, "_service", return_value=service),
+            mock.patch.object(server, "_enforce_allowed"),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_reads_every_tab_including_children(self) -> None:
+        result = server.docs_get_text("doc_1")
+        self.service.documents.return_value.get.assert_called_with(documentId="doc_1", includeTabsContent=True)
+        self.assertEqual([t["tab_id"] for t in result["tabs"]], ["t.0", "t.1", "t.2"])
+        self.assertIn("## Transcript\nsecond", result["text"])
+        self.assertIn("## Child\nthird", result["text"])
+
+    def test_reads_one_tab_by_id(self) -> None:
+        result = server.docs_get_text("doc_1", tab_id="t.1")
+        self.assertEqual(result["text"], "second")
+        self.assertNotIn("tabs", result)
+
+    def test_single_tab_doc_returns_plain_text(self) -> None:
+        self.doc["tabs"] = [_tab("t.0", "Tab 1", [_para("only\n")])]
+        self.assertEqual(server.docs_get_text("doc_1"), {"document_id": "doc_1", "title": "Notes", "text": "only"})
+
+    def test_unknown_tab_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            server.docs_get_text("doc_1", tab_id="t.missing")
+
+    def test_url_tab_param_is_passed_through(self) -> None:
+        result = server.workspace_get_from_url("https://docs.google.com/document/d/doc_1/edit?tab=t.2")
+        self.assertEqual(result["data"]["text"], "third")
+
+
+class DocTableTests(unittest.TestCase):
+    def test_extracts_table_cells(self) -> None:
+        content = [
+            {
+                "table": {
+                    "tableRows": [
+                        {"tableCells": [{"content": [_para("a")]}, {"content": [_para("b")]}]},
+                    ]
+                }
+            },
+            _para("after\n"),
+        ]
+        self.assertEqual(server._extract_text_from_doc_content(content), "a | b\nafter")
