@@ -5,7 +5,7 @@ import re
 import base64
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -126,6 +126,12 @@ def _enforce_allowed(file_id: str, drive_service=None) -> None:
 def _extract_text_from_doc_content(content: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for item in content:
+        table = item.get("table")
+        if table:
+            for row in table.get("tableRows", []):
+                cells = [_extract_text_from_doc_content(cell.get("content", [])) for cell in row.get("tableCells", [])]
+                parts.append(" | ".join(cells) + "\n")
+            continue
         paragraph = item.get("paragraph")
         if not paragraph:
             continue
@@ -134,6 +140,18 @@ def _extract_text_from_doc_content(content: list[dict[str, Any]]) -> str:
             if text:
                 parts.append(text)
     return "".join(parts).strip()
+
+
+def _flatten_doc_tabs(tabs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    flat: list[dict[str, Any]] = []
+    for tab in tabs:
+        props = tab.get("tabProperties", {})
+        content = tab.get("documentTab", {}).get("body", {}).get("content", [])
+        flat.append(
+            {"tab_id": props.get("tabId"), "title": props.get("title"), "text": _extract_text_from_doc_content(content)}
+        )
+        flat.extend(_flatten_doc_tabs(tab.get("childTabs", [])))
+    return flat
 
 
 def _decode_gmail_body_data(data: str) -> str:
@@ -265,13 +283,21 @@ def drive_get_file(file_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def docs_get_text(document_id: str) -> dict[str, Any]:
-    """Get plain text from a Google Doc by document id."""
+def docs_get_text(document_id: str, tab_id: str | None = None) -> dict[str, Any]:
+    """Get plain text from a Google Doc: every tab by default, or one tab by id (e.g. t.jlwui3k7a0hz)."""
     _enforce_allowed(document_id)
     service = _service("docs", "v1")
-    doc = service.documents().get(documentId=document_id).execute()
-    text = _extract_text_from_doc_content(doc.get("body", {}).get("content", []))
-    return {"document_id": document_id, "title": doc.get("title"), "text": text}
+    doc = service.documents().get(documentId=document_id, includeTabsContent=True).execute()
+    tabs = _flatten_doc_tabs(doc.get("tabs", []))
+    if tab_id:
+        tabs = [tab for tab in tabs if tab["tab_id"] == tab_id]
+        if not tabs:
+            raise ValueError(f"Tab {tab_id} not found in document {document_id}")
+    result: dict[str, Any] = {"document_id": document_id, "title": doc.get("title")}
+    if len(tabs) == 1:
+        return {**result, "text": tabs[0]["text"]}
+    result["text"] = "\n\n".join(f"## {tab['title']}\n{tab['text']}" for tab in tabs)
+    return {**result, "tabs": tabs}
 
 
 @mcp.tool()
@@ -298,7 +324,8 @@ def workspace_get_from_url(url: str) -> dict[str, Any]:
 
     kind, file_id = parsed
     if kind == "doc":
-        return {"kind": kind, "data": docs_get_text(file_id)}
+        tab_id = parse_qs(urlparse(url).query).get("tab", [None])[0]
+        return {"kind": kind, "data": docs_get_text(file_id, tab_id=tab_id)}
     if kind == "sheet":
         return {"kind": kind, "data": sheets_get_values(file_id)}
     return {"kind": kind, "data": drive_get_file(file_id)}
