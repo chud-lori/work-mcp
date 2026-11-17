@@ -301,18 +301,34 @@ def docs_get_text(document_id: str, tab_id: str | None = None) -> dict[str, Any]
 
 
 @mcp.tool()
-def sheets_get_values(spreadsheet_id: str, range_name: str = "A1:Z1000") -> dict[str, Any]:
-    """Get cell values from a Google Sheet range."""
+def sheets_get_values(
+    spreadsheet_id: str, range_name: str = "A1:Z1000", sheet_gid: int | None = None
+) -> dict[str, Any]:
+    """Get cell values from a Google Sheet range. sheet_gid picks the tab when range_name has no sheet name."""
     _enforce_allowed(spreadsheet_id)
     service = _service("sheets", "v4")
     spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    props = sorted((s.get("properties", {}) for s in spreadsheet.get("sheets", [])), key=lambda p: p.get("index", 0))
+    tabs = [{"sheet_id": p.get("sheetId"), "title": p.get("title"), "index": p.get("index")} for p in props]
+    if sheet_gid is not None and "!" not in range_name:
+        title = next((t["title"] for t in tabs if t["sheet_id"] == sheet_gid), None)
+        if title is None:
+            raise ValueError(f"Sheet gid {sheet_gid} not found in spreadsheet {spreadsheet_id}")
+        range_name = "'" + title.replace("'", "''") + "'!" + range_name
     values = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
     return {
         "spreadsheet_id": spreadsheet_id,
         "title": spreadsheet.get("properties", {}).get("title"),
         "range": values.get("range"),
         "values": values.get("values", []),
+        "tabs": tabs,
     }
+
+
+def _sheet_gid_from_url(url: str) -> int | None:
+    parts = urlparse(url)
+    gid = parse_qs(parts.query).get("gid") or parse_qs(parts.fragment).get("gid")
+    return int(gid[0]) if gid and gid[0].isdigit() else None
 
 
 @mcp.tool()
@@ -327,7 +343,7 @@ def workspace_get_from_url(url: str) -> dict[str, Any]:
         tab_id = parse_qs(urlparse(url).query).get("tab", [None])[0]
         return {"kind": kind, "data": docs_get_text(file_id, tab_id=tab_id)}
     if kind == "sheet":
-        return {"kind": kind, "data": sheets_get_values(file_id)}
+        return {"kind": kind, "data": sheets_get_values(file_id, sheet_gid=_sheet_gid_from_url(url))}
     return {"kind": kind, "data": drive_get_file(file_id)}
 
 

@@ -110,7 +110,7 @@ class WorkspaceDispatchTests(unittest.TestCase):
             calls.append(("doc", file_id))
             return {"id": file_id}
 
-        def fake_sheets(file_id: str) -> dict[str, str]:
+        def fake_sheets(file_id: str, sheet_gid: int | None = None) -> dict[str, str]:
             calls.append(("sheet", file_id))
             return {"id": file_id}
 
@@ -273,3 +273,71 @@ class DocTableTests(unittest.TestCase):
             _para("after\n"),
         ]
         self.assertEqual(server._extract_text_from_doc_content(content), "a | b\nafter")
+
+
+class SheetTabsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.spreadsheet = {
+            "properties": {"title": "Budget"},
+            "sheets": [
+                {"properties": {"sheetId": 555, "title": "Q2 [draft] Q's", "index": 1}},
+                {"properties": {"sheetId": 0, "title": "Sheet1", "index": 0}},
+            ],
+        }
+        service = mock.MagicMock()
+        sheets = service.spreadsheets.return_value
+        sheets.get.return_value.execute.return_value = self.spreadsheet
+        sheets.values.return_value.get.return_value.execute.return_value = {"range": "r", "values": [["x"]]}
+        self.values_get = sheets.values.return_value.get
+        patches = [
+            mock.patch.object(server, "_service", return_value=service),
+            mock.patch.object(server, "_enforce_allowed"),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def requested_range(self) -> str:
+        return self.values_get.call_args.kwargs["range"]
+
+    def test_gid_from_query_fragment_or_both(self) -> None:
+        base = "https://docs.google.com/spreadsheets/d/s1/edit"
+        cases = [
+            (base + "?gid=555", 555),
+            (base + "#gid=555", 555),
+            (base + "?gid=555#gid=0", 555),
+            (base, None),
+        ]
+        for url, expected in cases:
+            with self.subTest(url=url):
+                self.assertEqual(server._sheet_gid_from_url(url), expected)
+
+    def test_gid_resolves_to_quoted_title(self) -> None:
+        server.sheets_get_values("s1", sheet_gid=555)
+        self.assertEqual(self.requested_range(), "'Q2 [draft] Q''s'!A1:Z1000")
+
+    def test_unknown_gid_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            server.sheets_get_values("s1", sheet_gid=999)
+
+    def test_explicit_sheet_range_ignores_gid(self) -> None:
+        server.sheets_get_values("s1", range_name="Sheet1!B2:C3", sheet_gid=555)
+        self.assertEqual(self.requested_range(), "Sheet1!B2:C3")
+
+    def test_url_without_gid_reads_first_tab(self) -> None:
+        server.workspace_get_from_url("https://docs.google.com/spreadsheets/d/s1/edit")
+        self.assertEqual(self.requested_range(), "A1:Z1000")
+
+    def test_url_gid_is_passed_through(self) -> None:
+        server.workspace_get_from_url("https://docs.google.com/spreadsheets/d/s1/edit?gid=555#gid=555")
+        self.assertEqual(self.requested_range(), "'Q2 [draft] Q''s'!A1:Z1000")
+
+    def test_tabs_ordered_by_index(self) -> None:
+        result = server.sheets_get_values("s1")
+        self.assertEqual(
+            result["tabs"],
+            [
+                {"sheet_id": 0, "title": "Sheet1", "index": 0},
+                {"sheet_id": 555, "title": "Q2 [draft] Q's", "index": 1},
+            ],
+        )

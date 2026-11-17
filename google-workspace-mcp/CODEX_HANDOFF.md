@@ -27,7 +27,7 @@ gmail_get_message(message_id)
 drive_search(query, page_size=10, drive_id=None)
 drive_get_file(file_id)
 docs_get_text(document_id)
-sheets_get_values(spreadsheet_id, range_name="A1:Z1000")
+sheets_get_values(spreadsheet_id, range_name="A1:Z1000", sheet_gid=None)
 workspace_get_from_url(url)
 ```
 
