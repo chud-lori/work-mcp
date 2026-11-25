@@ -33,7 +33,7 @@ if ! "$GW/.venv/bin/python" -c '' >/dev/null 2>&1; then
   rm -rf "$GW/.venv"
   python3 -m venv "$GW/.venv"
 fi
-"$GW/.venv/bin/pip" install --quiet "$GW"
+"$GW/.venv/bin/python" -m pip install --quiet "$GW"
 GCFG="$HOME/.config/google-workspace-mcp"
 mkdir -p "$GCFG"
 if [ ! -f "$GCFG/oauth-client.json" ]; then
@@ -56,7 +56,7 @@ if ! "$FG/.venv/bin/python" -c '' >/dev/null 2>&1; then
   rm -rf "$FG/.venv"
   python3 -m venv "$FG/.venv"
 fi
-"$FG/.venv/bin/pip" install --quiet -e "$FG"
+"$FG/.venv/bin/python" -m pip install --quiet -e "$FG"
 if [ ! -f "$FG/.env" ]; then
   cp "$FG/.env.example" "$FG/.env"
   chmod 600 "$FG/.env"
