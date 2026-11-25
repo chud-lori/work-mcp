@@ -2,10 +2,10 @@
 
 A portable bundle of MCP servers for use with Claude Code (or any MCP client,
 e.g. Codex). Clone the repo, run `./setup.sh`, add your own credentials, and
-your agent can read Slack, Google Workspace, and Atlassian.
+your agent can read Slack, Google Workspace, Figma, and Atlassian.
 
-The two local servers (Slack, Google) are **read-only by design** — their
-credentials carry read-only scopes, so they cannot send, write, edit, or
+The three local servers (Slack, Google, Figma) are **read-only by design** —
+their credentials carry read-only scopes, so they cannot send, write, edit, or
 delete. The Atlassian server is **not** read-only: it is Atlassian's hosted MCP,
 which also exposes write tools (create/edit issues, comments, Confluence pages).
 See [Atlassian](#3-atlassian-jira--confluence) for how to block those. All
@@ -17,7 +17,8 @@ servers authenticate as *you* and see only what your account can already see.
 |---|---|---|
 | `slack-mcp/` | local Node | Read-only Slack: channels, threads, users, files/images, message search |
 | `google-workspace-mcp/` | local Python | Read-only Gmail, Drive, Docs, Sheets, Calendar |
-| atlassian | remote (`mcp-remote`) | Jira + Confluence via Atlassian's hosted MCP — read **and write**; no code here, `setup.sh` just registers it |
+| `figma-mcp/` | local Python | Read-only Figma: file search by name, page and frame structure, comments |
+| atlassian | remote (HTTP) | Jira + Confluence via Atlassian's hosted MCP — read **and write**; no code here, `setup.sh` just registers it |
 
 No secrets are committed to this repo. You supply your own tokens/credentials
 after cloning (see below), and `.gitignore` keeps them out of git.
@@ -42,7 +43,7 @@ Claude Code (user scope), and **skips any server that's already registered**, so
 re-running it is safe.
 
 After it finishes, add credentials for each server (next section), restart
-Claude Code, and run `/mcp` — all three should show as connected.
+Claude Code, and run `/mcp` — all four should show as connected.
 
 ## Credential setup
 
@@ -78,9 +79,26 @@ On first use the server opens an OAuth browser flow and writes
 Detailed Google Cloud Console walkthrough is in
 [`google-workspace-mcp/COMMANDS.md`](google-workspace-mcp/COMMANDS.md).
 
-### 3. Atlassian (Jira + Confluence)
+### 3. Figma
 
-Nothing to copy. This is Atlassian's hosted MCP registered via `mcp-remote`;
+Create a **scoped** personal access token (Figma, avatar, Settings, Security,
+Personal access tokens) with only `folders:read`, `file_content:read` and
+`file_comments:read`, then put it and your team id in `figma-mcp/.env`:
+
+```sh
+FIGMA_API_TOKEN=figd-your-token-here
+FIGMA_TEAM_ID=123456789
+```
+
+The team id is the number after `/team/` in your Figma team URL. `setup.sh`
+creates `figma-mcp/.env` from the example and chmods it 600. An unscoped token
+can post comments, which would break the read-only guarantee above, so scope it.
+Details and the deprecated scope names are in
+[`figma-mcp/README.md`](figma-mcp/README.md).
+
+### 4. Atlassian (Jira + Confluence)
+
+Nothing to copy. This is Atlassian's hosted MCP, registered over HTTP;
 a browser OAuth prompt appears the first time your agent uses it.
 
 Unlike the local servers, its tools include writes (creating and editing Jira
@@ -103,4 +121,4 @@ example MCP server config block.
 - To re-run Google OAuth from scratch, delete
   `~/.config/google-workspace-mcp/token.json` and trigger any Google tool.
 - To remove a server: `claude mcp remove <name>` (`slack`,
-  `google_workspace_local`, or `atlassian`).
+  `google_workspace_local`, `figma`, or `atlassian`).
