@@ -4,6 +4,8 @@ import os
 import unittest
 from unittest import mock
 
+import httpx
+
 from figma_mcp import server
 
 
@@ -12,26 +14,46 @@ def _reset_index() -> None:
 
 
 class _FakeApi:
-    """Stand-in for the Figma REST API that counts requests per path."""
+    """Stand-in for the Figma REST API that counts requests per path.
 
-    def __init__(self, responses: dict[str, dict]) -> None:
+    A status code in place of a body makes that path fail like Figma does.
+    """
+
+    def __init__(self, responses: dict[str, dict | int]) -> None:
         self.responses = responses
         self.calls: list[str] = []
 
     def __call__(self, path: str, **params) -> dict:
         self.calls.append(path)
-        return self.responses.get(path, {})
+        body = self.responses.get(path, {})
+        if isinstance(body, int):
+            request = httpx.Request("GET", f"https://api.figma.com{path}")
+            response = httpx.Response(body, request=request, json={"status": body})
+            raise httpx.HTTPStatusError(f"{body}", request=request, response=response)
+        return body
 
+
+FILES_P1 = {
+    "files": [
+        {"key": "k1", "name": "Listing Card", "last_modified": "2026-11-01T00:00:00Z"},
+        {"key": "k2", "name": "Homepage Redesign", "last_modified": "2026-11-02T00:00:00Z"},
+    ]
+}
+FILES_P2 = {"files": [{"key": "k3", "name": "Mobile Homepage", "last_modified": ""}]}
 
 TEAM_RESPONSES = {
-    "/teams/42/projects": {"projects": [{"id": "p1", "name": "Web"}, {"id": "p2", "name": "Mobile"}]},
-    "/projects/p1/files": {
-        "files": [
-            {"key": "k1", "name": "Listing Card", "last_modified": "2026-11-01T00:00:00Z"},
-            {"key": "k2", "name": "Homepage Redesign", "last_modified": "2026-11-02T00:00:00Z"},
-        ]
-    },
-    "/projects/p2/files": {"files": [{"key": "k3", "name": "Mobile Homepage", "last_modified": ""}]},
+    "/v2/teams/42/folders": {"folders": [{"id": "p1", "name": "Web"}, {"id": "p2", "name": "Mobile"}]},
+    "/v2/folders/p1/files": FILES_P1,
+    "/v2/folders/p2/files": FILES_P2,
+}
+
+LEGACY_RESPONSES = {
+    "/v2/teams/42/folders": 403,
+    "/v2/folders/p1/files": 403,
+    "/v2/folders/p2/files": 403,
+    "/v1/teams/42/projects": {"projects": [{"id": "p1", "name": "Web"}, {"id": "p2", "name": "Mobile"}]},
+    "/v1/projects/p1/files": FILES_P1,
+    "/v1/projects/p2/files": FILES_P2,
 }
 
 
@@ -90,8 +112,8 @@ class SearchTests(unittest.TestCase):
             server.figma_search_files("homepage")
             server.figma_list_projects()
 
-        self.assertEqual(api.calls.count("/teams/42/projects"), 1)
-        self.assertEqual(api.calls.count("/projects/p1/files"), 1)
+        self.assertEqual(api.calls.count("/v2/teams/42/folders"), 1)
+        self.assertEqual(api.calls.count("/v2/folders/p1/files"), 1)
 
     def test_refresh_rebuilds_the_index(self) -> None:
         api = _FakeApi(TEAM_RESPONSES)
@@ -99,16 +121,43 @@ class SearchTests(unittest.TestCase):
             server.figma_list_projects()
             server.figma_list_projects(refresh=True)
 
-        self.assertEqual(api.calls.count("/teams/42/projects"), 2)
+        self.assertEqual(api.calls.count("/v2/teams/42/folders"), 2)
 
     def test_a_changed_team_id_is_not_served_from_the_old_cache(self) -> None:
-        api = _FakeApi({**TEAM_RESPONSES, "/teams/99/projects": {"projects": []}})
+        api = _FakeApi({**TEAM_RESPONSES, "/v2/teams/99/folders": {"folders": []}})
         with mock.patch.object(server, "_get", api):
             server.figma_list_projects()
             with mock.patch.dict(os.environ, {"FIGMA_TEAM_ID": "99"}):
                 result = server.figma_list_projects()
 
         self.assertEqual(result["projects"], [])
+
+    def test_falls_back_to_the_deprecated_projects_api_when_v2_is_refused(self) -> None:
+        api = _FakeApi(LEGACY_RESPONSES)
+        with mock.patch.object(server, "_get", api):
+            result = server.figma_search_files("homepage")
+
+        self.assertEqual(result["total_matches"], 2)
+        self.assertIn("/v1/teams/42/projects", api.calls)
+
+    def test_says_which_scope_is_missing_when_both_apis_refuse(self) -> None:
+        api = _FakeApi({"/v2/teams/42/folders": 403, "/v1/teams/42/projects": 403})
+        with mock.patch.object(server, "_get", api):
+            with self.assertRaisesRegex(RuntimeError, "files:read or projects:read"):
+                server.figma_list_projects()
+
+    def test_a_404_from_v2_also_falls_back(self) -> None:
+        api = _FakeApi({**LEGACY_RESPONSES, "/v2/teams/42/folders": 404})
+        with mock.patch.object(server, "_get", api):
+            result = server.figma_list_projects()
+
+        self.assertEqual([p["name"] for p in result["projects"]], ["Web", "Mobile"])
+
+    def test_a_server_error_is_not_swallowed_as_a_permission_problem(self) -> None:
+        api = _FakeApi({"/v2/teams/42/folders": 500})
+        with mock.patch.object(server, "_get", api):
+            with self.assertRaises(httpx.HTTPStatusError):
+                server.figma_list_projects()
 
     def test_a_missing_team_id_names_the_variable(self) -> None:
         with mock.patch.dict(os.environ, {"FIGMA_TEAM_ID": ""}):
@@ -125,7 +174,7 @@ class FileTests(unittest.TestCase):
     def test_maps_pages_to_their_top_level_frames(self) -> None:
         api = _FakeApi(
             {
-                "/files/k1": {
+                "/v1/files/k1": {
                     "name": "Listing Card",
                     "lastModified": "2026-11-01T00:00:00Z",
                     "document": {
@@ -151,7 +200,7 @@ class FileTests(unittest.TestCase):
 
     def test_caps_the_frames_per_page_and_says_so(self) -> None:
         children = [{"id": str(i), "name": f"Frame {i}", "type": "FRAME"} for i in range(server.MAX_FRAMES_PER_PAGE + 5)]
-        api = _FakeApi({"/files/k1": {"document": {"children": [{"name": "Page 1", "children": children}]}}})
+        api = _FakeApi({"/v1/files/k1": {"document": {"children": [{"name": "Page 1", "children": children}]}}})
         with mock.patch.object(server, "_get", api):
             result = server.figma_get_file("k1")
 
@@ -169,7 +218,7 @@ class CommentTests(unittest.TestCase):
     def test_flags_a_resolved_comment_and_keeps_the_newest_within_limit(self) -> None:
         api = _FakeApi(
             {
-                "/files/k1/comments": {
+                "/v1/files/k1/comments": {
                     "comments": [
                         {"user": {"handle": "ana"}, "message": "old", "created_at": "2026-01-01"},
                         {
@@ -194,7 +243,7 @@ class CommentTests(unittest.TestCase):
         self.assertEqual(comment["node_id"], "1:2")
 
     def test_an_unresolved_comment_without_client_meta_is_not_resolved(self) -> None:
-        api = _FakeApi({"/files/k1/comments": {"comments": [{"user": {}, "message": "hi", "client_meta": None}]}})
+        api = _FakeApi({"/v1/files/k1/comments": {"comments": [{"user": {}, "message": "hi", "client_meta": None}]}})
         with mock.patch.object(server, "_get", api):
             result = server.figma_get_comments("k1")
 

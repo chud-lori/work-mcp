@@ -91,7 +91,11 @@ FIGMA_TEAM_ID=123456789
 ```
 
 The team id is the number after `/team/` in your Figma team URL. `setup.sh`
-creates `figma-mcp/.env` from the example and chmods it 600. An unscoped token
+creates `figma-mcp/.env` from the example and chmods it 600. Reading a file or
+its comments works with those three scopes; listing or searching a whole team
+additionally needs either a plan that allows Figma's v2 folders API or the
+deprecated `files:read`/`projects:read` scope, so it is not available on every
+account. `figma-mcp/README.md` explains which refusal is which. An unscoped token
 can post comments, which would break the read-only guarantee above, so scope it.
 Details and the deprecated scope names are in
 [`figma-mcp/README.md`](figma-mcp/README.md).

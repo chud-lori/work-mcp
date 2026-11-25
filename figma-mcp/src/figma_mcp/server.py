@@ -14,7 +14,7 @@ from mcp.server.fastmcp import FastMCP
 # package root is the only one it can find.
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-API_BASE = "https://api.figma.com/v1"
+API_BASE = "https://api.figma.com"
 INDEX_TTL_S = 15 * 60
 MAX_FRAMES_PER_PAGE = 50
 
@@ -46,6 +46,31 @@ def _get(path: str, **params: Any) -> dict[str, Any]:
         return response.json()
 
 
+def _folders(team_id: str) -> list[dict[str, Any]]:
+    """Top-level folders in a team, by whichever of Figma's two APIs this token can reach.
+
+    /v2 is the current one and takes folders:read. /v1 is deprecated and takes
+    files:read or projects:read, neither of which Figma offers when minting a
+    scoped token any more, so it only answers a legacy unscoped token.
+    """
+    try:
+        return _get(f"/v2/teams/{team_id}/folders").get("folders", [])
+    except httpx.HTTPStatusError as v2_error:
+        if v2_error.response.status_code not in (403, 404):
+            raise
+        try:
+            return _get(f"/v1/teams/{team_id}/projects").get("projects", [])
+        except httpx.HTTPStatusError as v1_error:
+            if v1_error.response.status_code != 403:
+                raise
+            raise RuntimeError(
+                f"Figma will not list team {team_id}. The current folders API answered "
+                f"{v2_error.response.status_code}, which is a plan or team-membership limit rather than a "
+                "scope one, and the deprecated projects API wants files:read or projects:read, which this "
+                "token does not carry. Reading a file or its comments by key or URL is unaffected."
+            ) from v1_error
+
+
 def _file_key(file_key_or_url: str) -> str:
     match = _FILE_KEY_RE.search(file_key_or_url)
     return match.group(1) if match else file_key_or_url.strip()
@@ -60,14 +85,24 @@ def _project_index(refresh: bool = False) -> list[dict[str, Any]]:
 
     projects = [
         {
-            "id": project["id"],
-            "name": project.get("name", ""),
-            "files": _get(f"/projects/{project['id']}/files").get("files", []),
+            "id": folder["id"],
+            "name": folder.get("name", ""),
+            "files": _folder_files(folder["id"]),
         }
-        for project in _get(f"/teams/{team_id}/projects").get("projects", [])
+        for folder in _folders(team_id)
     ]
     _index.update({"team_id": team_id, "fetched_at": time.monotonic(), "projects": projects})
     return projects
+
+
+def _folder_files(folder_id: str) -> list[dict[str, Any]]:
+    """Files directly in a folder, again preferring v2 over the deprecated project route."""
+    try:
+        return _get(f"/v2/folders/{folder_id}/files").get("files", [])
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code not in (403, 404):
+            raise
+        return _get(f"/v1/projects/{folder_id}/files").get("files", [])
 
 
 @mcp.tool()
@@ -114,7 +149,7 @@ def figma_get_file(file_key_or_url: str, depth: int = 2) -> dict[str, Any]:
     handoff conversation needs; raising it walks further into the node tree.
     """
     key = _file_key(file_key_or_url)
-    data = _get(f"/files/{key}", depth=depth)
+    data = _get(f"/v1/files/{key}", depth=depth)
 
     pages = []
     for page in data.get("document", {}).get("children", []):
@@ -143,7 +178,7 @@ def figma_get_file(file_key_or_url: str, depth: int = 2) -> dict[str, Any]:
 def figma_get_comments(file_key_or_url: str, limit: int = 20) -> dict[str, Any]:
     """Get the most recent comments on a Figma file, oldest of the returned set first."""
     key = _file_key(file_key_or_url)
-    comments = _get(f"/files/{key}/comments").get("comments", [])
+    comments = _get(f"/v1/files/{key}/comments").get("comments", [])
     return {
         "file_key": key,
         "total_comments": len(comments),
