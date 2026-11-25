@@ -70,12 +70,78 @@ function text(obj) {
   return { content: [{ type: "text", text: JSON.stringify(obj, null, 2) }] };
 }
 
+function richTextElement(el) {
+  switch (el.type) {
+    case "text":
+      return el.text;
+    case "link":
+      return el.text ? `${el.text} (${el.url})` : el.url;
+    case "user":
+      return `<@${el.user_id}>`;
+    case "channel":
+      return `<#${el.channel_id}>`;
+    case "usergroup":
+      return `<!subteam^${el.usergroup_id}>`;
+    case "emoji":
+      return `:${el.name}:`;
+    case "rich_text_section":
+    case "rich_text_preformatted":
+    case "rich_text_quote":
+      return (el.elements ?? []).map(richTextElement).join("");
+    case "rich_text_list":
+      return (el.elements ?? [])
+        .map((item, i) => {
+          const marker = el.style === "ordered" ? `${(el.offset ?? 0) + i + 1}.` : "-";
+          return `${"  ".repeat(el.indent ?? 0)}${marker} ${richTextElement(item)}`;
+        })
+        .join("\n");
+    default:
+      return "";
+  }
+}
+
+function blockText(block) {
+  switch (block.type) {
+    case "rich_text":
+      return (block.elements ?? []).map(richTextElement).join("\n");
+    case "section":
+      return [block.text?.text, ...(block.fields ?? []).map((f) => f.text)]
+        .filter(Boolean)
+        .join("\n");
+    case "header":
+      return block.text?.text ?? "";
+    case "context":
+      return (block.elements ?? []).map((e) => e.text).filter(Boolean).join(" ");
+    default:
+      return "";
+  }
+}
+
+// Slack's `text` can drop rich-text content such as list items.
+function blocksText(m) {
+  const out = (m.blocks ?? []).map(blockText).filter(Boolean).join("\n").trim();
+  return out && out !== m.text?.trim() ? out : undefined;
+}
+
+function slimAttachment(a) {
+  return {
+    title: a.title,
+    title_link: a.title_link,
+    text: a.text || a.fallback,
+    from_url: a.from_url,
+    service_name: a.service_name,
+    blocks_text: a.blocks ? blocksText({ blocks: a.blocks, text: a.text }) : undefined,
+  };
+}
+
 function slimMessage(m) {
   return {
     ts: m.ts,
     thread_ts: m.thread_ts,
     user: m.user ?? m.bot_id,
     text: m.text,
+    blocks_text: blocksText(m),
+    attachments: m.attachments?.map(slimAttachment),
     reply_count: m.reply_count,
     reactions: m.reactions?.map((r) => `${r.name}:${r.count}`),
     files: m.files?.map((f) => ({
@@ -264,6 +330,7 @@ if (SEARCH_ENABLED) {
           user: m.username,
           ts: m.ts,
           text: m.text,
+          blocks_text: blocksText(m),
           permalink: m.permalink,
         })),
       });

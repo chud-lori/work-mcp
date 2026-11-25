@@ -14,6 +14,9 @@ read-only by design (the token has no write scopes).
 - `slack_get_file` — download a shared file; images are returned viewably
 - `slack_search_messages` — search messages across the workspace
 
+Messages include `blocks_text` when the rich-text blocks hold more than `text`
+(lists, for example), and `attachments` for link unfurls.
+
 ## Setup
 
 ### 1. Create a Slack app and get a user token
