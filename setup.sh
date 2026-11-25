@@ -33,7 +33,7 @@ if ! "$GW/.venv/bin/python" -c '' >/dev/null 2>&1; then
   rm -rf "$GW/.venv"
   python3 -m venv "$GW/.venv"
 fi
-"$GW/.venv/bin/pip" install --quiet "$GW"
+"$GW/.venv/bin/python" -m pip install --quiet "$GW"
 GCFG="$HOME/.config/google-workspace-mcp"
 mkdir -p "$GCFG"
 if [ ! -f "$GCFG/oauth-client.json" ]; then
@@ -49,16 +49,36 @@ else
     -- "$GW/.venv/bin/google-workspace-mcp"
 fi
 
+echo "==> figma-mcp (Python)"
+FG="$DIR/figma-mcp"
+# rebuild the venv if missing or broken (e.g. copied from another machine)
+if ! "$FG/.venv/bin/python" -c '' >/dev/null 2>&1; then
+  rm -rf "$FG/.venv"
+  python3 -m venv "$FG/.venv"
+fi
+"$FG/.venv/bin/python" -m pip install --quiet -e "$FG"
+if [ ! -f "$FG/.env" ]; then
+  cp "$FG/.env.example" "$FG/.env"
+  chmod 600 "$FG/.env"
+  echo "    NOTE: put your FIGMA_API_TOKEN and FIGMA_TEAM_ID in $FG/.env"
+fi
+if registered figma; then
+  echo "    already registered, skipping"
+else
+  claude mcp add --scope user figma -- "$FG/.venv/bin/figma-mcp"
+fi
+
 echo "==> atlassian (remote — Jira + Confluence)"
 if registered atlassian; then
   echo "    already registered, skipping"
 else
-  claude mcp add --scope user atlassian -- npx -y mcp-remote https://mcp.atlassian.com/v1/sse
+  claude mcp add --scope user --transport http atlassian https://mcp.atlassian.com/v2/mcp
 fi
 
 echo
 echo "Done. Remaining manual steps (first run on a new machine):"
 echo "  1. Slack token   -> $DIR/slack-mcp/.env"
 echo "  2. Google creds  -> $GCFG/ (or delete token.json to re-run OAuth)"
-echo "  3. Atlassian     -> browser OAuth prompt appears on first use"
+echo "  3. Figma token   -> $DIR/figma-mcp/.env (scoped read-only PAT + team id)"
+echo "  4. Atlassian     -> browser OAuth prompt appears on first use"
 echo "Then restart Claude Code and run /mcp to verify."
