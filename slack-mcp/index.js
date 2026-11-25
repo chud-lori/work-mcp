@@ -71,6 +71,7 @@ function text(obj) {
 }
 
 function richTextElement(el) {
+  if (!el) return "";
   switch (el.type) {
     case "text":
       return el.text;
@@ -84,6 +85,12 @@ function richTextElement(el) {
       return `<!subteam^${el.usergroup_id}>`;
     case "emoji":
       return `:${el.name}:`;
+    case "broadcast":
+      return `@${el.range}`;
+    case "date":
+      return el.fallback ?? String(el.timestamp);
+    case "color":
+      return el.value;
     case "rich_text_section":
     case "rich_text_preformatted":
     case "rich_text_quote":
@@ -96,11 +103,12 @@ function richTextElement(el) {
         })
         .join("\n");
     default:
-      return "";
+      return `[${el.type}] ${JSON.stringify(el).slice(0, 500)}`;
   }
 }
 
 function blockText(block) {
+  if (!block) return "";
   switch (block.type) {
     case "rich_text":
       return (block.elements ?? []).map(richTextElement).join("\n");
@@ -112,14 +120,48 @@ function blockText(block) {
       return block.text?.text ?? "";
     case "context":
       return (block.elements ?? []).map((e) => e.text).filter(Boolean).join(" ");
-    default:
+    case "markdown":
+      return block.text ?? "";
+    case "table":
+      return (block.rows ?? [])
+        .map((row) => `| ${row.map(tableCell).join(" | ")} |`)
+        .join("\n");
+    case "actions":
+      return (block.elements ?? [])
+        .map((e) => [e.text?.text, e.url].filter(Boolean).join(" "))
+        .filter(Boolean)
+        .map((s) => `[${s}]`)
+        .join(" ");
+    case "image":
+      return `[image: ${block.title?.text || block.alt_text || ""} ${block.image_url ?? block.slack_file?.url ?? ""}]`;
+    case "video":
+      return `[video: ${block.title?.text ?? ""} ${block.title_url ?? block.video_url ?? ""}]`;
+    case "file":
+      return `[file: ${block.external_id ?? block.file_id ?? ""}]`;
+    case "divider":
       return "";
+    default:
+      // Unknown block types are dumped so their content is never silently lost.
+      return `[${block.type} block] ${JSON.stringify(block).slice(0, 2000)}`;
   }
+}
+
+function tableCell(cell) {
+  if (!cell) return "";
+  if (cell.type === "raw_text") return cell.text ?? "";
+  if (cell.type === "rich_text") return (cell.elements ?? []).map(richTextElement).join(" ");
+  return cell.text ?? "";
 }
 
 // Slack's `text` can drop rich-text content such as list items.
 function blocksText(m) {
-  const out = (m.blocks ?? []).map(blockText).filter(Boolean).join("\n").trim();
+  let out;
+  try {
+    out = (m.blocks ?? []).map(blockText).filter(Boolean).join("\n").trim();
+  } catch (err) {
+    // One malformed block must not fail the whole thread read.
+    return `[blocks unreadable: ${err.message}] ${JSON.stringify(m.blocks).slice(0, 2000)}`;
+  }
   return out && out !== m.text?.trim() ? out : undefined;
 }
 
